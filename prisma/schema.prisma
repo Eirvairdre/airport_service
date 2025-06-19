@@ -1,0 +1,275 @@
+// Схема базы данных для аэропорта
+// Делаю курсовую по веб-разработке, тут все таблицы для управления аэропортом
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Пользователи системы - для авторизации через NextAuth
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  name      String?
+  position  String?
+  role      String   // админ или обычный пользователь
+  sessions  Session[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Сессии для NextAuth - чтобы пользователи не выходили постоянно
+model Session {
+  id           Int      @id @default(autoincrement())
+  sessionToken String   @unique
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id])
+  expires      DateTime
+}
+
+// Статусы рейсов - чтобы знать, что происходит с полетом
+enum FlightStatus {
+  Scheduled
+  Delayed
+  Cancelled
+  Completed
+}
+
+// Дни недели для расписания
+enum DayOfWeek {
+  Mon
+  Tue
+  Wed
+  Thu
+  Fri
+  Sat
+  Sun
+}
+
+// Уровни серьезности инцидентов
+enum Severity {
+  Low
+  Medium
+  High
+  Critical
+}
+
+// Аэропорты - основная таблица
+model Airport {
+  airport_id   Int      @id @default(autoincrement())
+  name         String?  @db.VarChar(100)
+  city         String?  @db.VarChar(100)
+  country      String?  @db.VarChar(100)
+  iata_code    String?  @db.Char(3)
+  icao_code    String?  @db.Char(4)
+  terminals    Terminal[]
+  stands       Stand[]
+  departureFlights Flight[] @relation("DepartureAirport")
+  arrivalFlights   Flight[] @relation("ArrivalAirport")
+}
+
+// Терминалы аэропорта
+model Terminal {
+  terminal_id Int     @id @default(autoincrement())
+  airport_id  Int?
+  name        String? @db.VarChar(10)
+  airport     Airport? @relation(fields: [airport_id], references: [airport_id])
+  gates       Gate[]
+}
+
+// Ворота в терминалах
+model Gate {
+  gate_id     Int     @id @default(autoincrement())
+  terminal_id Int?
+  gate_number String? @db.VarChar(10)
+  terminal    Terminal? @relation(fields: [terminal_id], references: [terminal_id])
+  flights     Flight[]
+}
+
+// Стоянки для самолетов
+model Stand {
+  stand_id        Int     @id
+  fk_Stand_Airport Int?
+  stand_number    String? @db.VarChar(10)
+  airport         Airport? @relation(fields: [fk_Stand_Airport], references: [airport_id])
+  flights         Flight[]
+}
+
+// Типы самолетов - Boeing, Airbus и т.д.
+model Aircraft_Type {
+  aircraft_type_id Int    @id
+  model           String? @db.VarChar(50)
+  manufacturer    String? @db.VarChar(50)
+  seats           Int?
+  max_range_km    Int?
+  aircrafts       Aircraft[]
+}
+
+// Авиакомпании
+model Airline {
+  airline_id Int    @id
+  name       String? @db.VarChar(100)
+  iata_code  String? @db.Char(2)
+  country    String? @db.VarChar(50)
+  aircrafts  Aircraft[]
+  flights    Flight[]
+}
+
+// Конкретные самолеты
+model Aircraft {
+  aircraft_id      Int     @id
+  aircraft_type_id Int?
+  tail_number      String? @db.VarChar(10)
+  airline_id       Int?
+  aircraft_type    Aircraft_Type? @relation(fields: [aircraft_type_id], references: [aircraft_type_id])
+  airline          Airline? @relation(fields: [airline_id], references: [airline_id])
+  flights          Flight[]
+  maintenances     Maintenance[]
+}
+
+// Рейсы - основная бизнес-логика
+model Flight {
+  flight_id           Int      @id
+  aircraft_id         Int?
+  airline_id          Int?
+  gate_id             Int?
+  stand_id            Int?
+  departure_airport_id Int?
+  arrival_airport_id   Int?
+  scheduled_departure DateTime?
+  scheduled_arrival   DateTime?
+  flight_number       String?  @db.VarChar(10)
+  status              FlightStatus?
+  aircraft            Aircraft? @relation(fields: [aircraft_id], references: [aircraft_id])
+  airline             Airline? @relation(fields: [airline_id], references: [airline_id])
+  gate                Gate? @relation(fields: [gate_id], references: [gate_id])
+  stand               Stand? @relation(fields: [stand_id], references: [stand_id])
+  departureAirport    Airport? @relation("DepartureAirport", fields: [departure_airport_id], references: [airport_id])
+  arrivalAirport      Airport? @relation("ArrivalAirport", fields: [arrival_airport_id], references: [airport_id])
+  schedules           Flight_Schedule[]
+  tickets             Ticket[]
+  crew                Crew[]
+  incidents           Incident[]
+}
+
+// Расписание рейсов - для регулярных полетов
+model Flight_Schedule {
+  schedule_id   Int      @id
+  flight_id     Int?
+  day_of_week   DayOfWeek?
+  departure_time DateTime?
+  arrival_time   DateTime?
+  flight         Flight? @relation(fields: [flight_id], references: [flight_id])
+}
+
+// Пассажиры
+model Passenger {
+  passenger_id   Int     @id
+  name           String? @db.VarChar(100)
+  passport_number String? @db.VarChar(20)
+  nationality    String? @db.VarChar(50)
+  birth_date     DateTime?
+  tickets        Ticket[]
+}
+
+// Билеты
+model Ticket {
+  ticket_id        Int     @id
+  passenger_id     Int?
+  flight_id        Int?
+  seat_number      String? @db.VarChar(5)
+  ticket_price     Decimal?  @db.Decimal(10,2)
+  baggage_included Boolean?
+  passenger        Passenger? @relation(fields: [passenger_id], references: [passenger_id])
+  flight           Flight? @relation(fields: [flight_id], references: [flight_id])
+  checkins         Checkin[]
+}
+
+// Персонал аэропорта
+model Personnel {
+  personnel_id   Int     @id
+  name           String? @db.VarChar(100)
+  position_id    Int?
+  license_number String? @db.VarChar(50)
+  hired_date     DateTime?
+  crew_members   Crew_Member[]
+  maintenances   Maintenance[]
+  incidents      Incident[]
+}
+
+// Экипажи рейсов
+model Crew {
+  crew_id   Int   @id
+  flight_id Int?
+  flight    Flight? @relation(fields: [flight_id], references: [flight_id])
+  members   Crew_Member[]
+}
+
+// Члены экипажа - связка между экипажем и персоналом
+model Crew_Member {
+  crew_id      Int
+  personnel_id Int
+  role         String? @db.VarChar(50)
+  crew         Crew @relation(fields: [crew_id], references: [crew_id])
+  personnel    Personnel @relation(fields: [personnel_id], references: [personnel_id])
+
+  @@id([crew_id, personnel_id])
+}
+
+// Регистрация пассажиров на рейс
+model Checkin {
+  checkin_id   Int     @id
+  ticket_id    Int?
+  checkin_time DateTime?
+  baggage_count Int?
+  ticket       Ticket? @relation(fields: [ticket_id], references: [ticket_id])
+  baggages     Baggage[]
+}
+
+// Багаж пассажиров
+model Baggage {
+  baggage_id   Int     @id
+  checkin_id   Int?
+  weight_kg    Decimal?  @db.Decimal(5,2)
+  label_number String? @db.VarChar(20)
+  checkin      Checkin? @relation(fields: [checkin_id], references: [checkin_id])
+}
+
+// Техническое обслуживание самолетов
+model Maintenance {
+  maintenance_id Int     @id @default(autoincrement())
+  aircraft_id    Int?
+  personnel_id   Int?
+  start_time     DateTime?
+  end_time       DateTime?
+  description    String? @db.Text
+  aircraft       Aircraft? @relation(fields: [aircraft_id], references: [aircraft_id])
+  personnel      Personnel? @relation(fields: [personnel_id], references: [personnel_id])
+  logs           Maintenance_Log[]
+}
+
+// Логи техобслуживания - что делали с самолетом
+model Maintenance_Log {
+  log_id         Int     @id
+  maintenance_id Int?
+  action         String? @db.Text
+  timestamp      DateTime?
+  maintenance    Maintenance? @relation(fields: [maintenance_id], references: [maintenance_id])
+}
+
+// Инциденты - если что-то пошло не так
+model Incident {
+  incident_id   Int     @id @default(autoincrement())
+  flight_id     Int?
+  personnel_id  Int?
+  incident_time DateTime?
+  description   String? @db.Text
+  severity      Severity?
+  flight        Flight? @relation(fields: [flight_id], references: [flight_id])
+  personnel     Personnel? @relation(fields: [personnel_id], references: [personnel_id])
+}
